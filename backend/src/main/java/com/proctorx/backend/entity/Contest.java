@@ -5,6 +5,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "contests")
@@ -20,7 +22,7 @@ public class Contest {
 
     @ManyToOne
     @JoinColumn(name = "admin_id", nullable = false)
-    private User admin; // Links to the User table
+    private User admin;
 
     @Column(nullable = false)
     private String title;
@@ -32,7 +34,6 @@ public class Contest {
 
     private String status = "DRAFT"; // 'DRAFT', 'LIVE', 'ENDED'
 
-    // Tokens for access
     @Column(name = "student_token", unique = true)
     private String studentToken;
 
@@ -47,4 +48,10 @@ public class Contest {
 
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    // --- NEW: Whitelist for Emails ---
+    @ElementCollection
+    @CollectionTable(name = "contest_allowed_emails", joinColumns = @JoinColumn(name = "contest_id"))
+    @Column(name = "email")
+    private List<String> allowedEmails = new ArrayList<>();
 }

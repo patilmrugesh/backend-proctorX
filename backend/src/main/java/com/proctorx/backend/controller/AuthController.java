@@ -11,7 +11,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "*") // Allow React frontend to connect
+@CrossOrigin(origins = "*")
 public class AuthController {
 
     @Autowired
@@ -39,7 +39,11 @@ public class AuthController {
             response.put("message", "Login Successful");
             response.put("role", user.getRole());
             response.put("userId", user.getUserId());
-            response.put("credits", user.getWalletCredits());
+            response.put("walletCredits", user.getWalletCredits());
+            // --- FIX: Send Email to Frontend ---
+            response.put("username", user.getUsername());
+            response.put("email", user.getEmail());
+
             return ResponseEntity.ok(response);
         } else {
             return ResponseEntity.status(401).body("Invalid Credentials");
