@@ -8,10 +8,13 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ProctorEvent {
-    private String type; // "TAB_SWITCH", "ONLINE", "DISCONNECT"
+    private String type; // "TAB_SWITCH", "ONLINE", "CAMERA_FRAME"
     private Long userId;
     private String username;
     private Long contestId;
-    private String message; // e.g., "User switched tabs 5 times"
+    private String message;
     private String timestamp;
+
+    // --- NEW: Holds the Base64 Image String ---
+    private String image;
 }

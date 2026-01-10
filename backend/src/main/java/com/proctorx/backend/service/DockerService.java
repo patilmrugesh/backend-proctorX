@@ -3,10 +3,7 @@ package com.proctorx.backend.service;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -19,42 +16,34 @@ public class DockerService {
     @Value("${proctorx.code.temp-dir}")
     private String tempDirBase;
 
-    public String runCode(String code, String language, String input) throws IOException, InterruptedException {
+    // CONSTANT: Time taken for Docker to boot up on Windows/WSL (adjust as needed)
+    private static final int DOCKER_STARTUP_BUFFER = 10;
+
+    // --- UPDATED SIGNATURE: Added 'timeLimitSec' ---
+    public String runCode(String code, String language, String inputData, Double timeLimitSec) throws IOException, InterruptedException {
         String folderName = UUID.randomUUID().toString();
         Path folderPath = Paths.get(tempDirBase, folderName);
         Files.createDirectories(folderPath);
 
         File codeFile;
-        File inputFile = new File(folderPath.toFile(), "input.txt");
-
         if ("CPP".equalsIgnoreCase(language)) {
             codeFile = new File(folderPath.toFile(), "Solution.cpp");
+        } else if ("JAVA".equalsIgnoreCase(language)) {
+            codeFile = new File(folderPath.toFile(), "Main.java");
         } else {
             codeFile = new File(folderPath.toFile(), "Solution.py");
         }
-
         Files.writeString(codeFile.toPath(), code);
-        Files.writeString(inputFile.toPath(), input);
 
         String absolutePath = folderPath.toAbsolutePath().toString();
         ProcessBuilder builder = new ProcessBuilder();
 
         if ("PYTHON".equalsIgnoreCase(language)) {
-            builder.command(
-                    "docker", "run", "--rm",
-                    "--network", "none",
-                    "-v", absolutePath + ":/app",
-                    "python:3.9-alpine",
-                    "sh", "-c", "python /app/Solution.py < /app/input.txt"
-            );
+            builder.command("docker", "run", "-i", "--rm", "-v", absolutePath + ":/app", "python:3.9-alpine", "python", "/app/Solution.py");
         } else if ("CPP".equalsIgnoreCase(language)) {
-            builder.command(
-                    "docker", "run", "--rm",
-                    "--network", "none",
-                    "-v", absolutePath + ":/app",
-                    "gcc:latest",
-                    "sh", "-c", "g++ -o /app/out /app/Solution.cpp && /app/out < /app/input.txt"
-            );
+            builder.command("docker", "run", "-i", "--rm", "-v", absolutePath + ":/app", "gcc:latest", "sh", "-c", "g++ -o /app/out /app/Solution.cpp && /app/out");
+        } else if ("JAVA".equalsIgnoreCase(language)) {
+            builder.command("docker", "run", "-i", "--rm", "-v", absolutePath + ":/app", "openjdk:17-alpine", "sh", "-c", "javac /app/Main.java && java -cp /app Main");
         } else {
             return "Error: Unsupported Language";
         }
@@ -62,8 +51,20 @@ public class DockerService {
         builder.redirectErrorStream(true);
         Process process = builder.start();
 
-        // FIX: Increased timeout to 15 seconds to allow Docker startup time on Windows
-        boolean finished = process.waitFor(15, TimeUnit.SECONDS);
+        if (inputData != null) {
+            try (OutputStream os = process.getOutputStream();
+                 BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(os))) {
+                writer.write(inputData);
+                writer.flush();
+            }
+        }
+
+        // --- DYNAMIC TIMEOUT LOGIC ---
+        // If question limit is 2.0s, we wait 12.0s total to account for Docker startup.
+        // In a real Linux server deployment, DOCKER_STARTUP_BUFFER can be reduced to 0 or 1.
+        long totalWaitTime = (long) Math.ceil(timeLimitSec + DOCKER_STARTUP_BUFFER);
+
+        boolean finished = process.waitFor(totalWaitTime, TimeUnit.SECONDS);
 
         if (!finished) {
             process.destroy();
@@ -78,7 +79,7 @@ public class DockerService {
             }
         }
 
-        deleteDirectory(folderPath.toFile());
+        try { deleteDirectory(folderPath.toFile()); } catch (Exception e) {}
 
         return output.toString().trim();
     }

@@ -1,5 +1,4 @@
 package com.proctorx.backend.controller;
-
 import com.proctorx.backend.dto.ProctorEvent;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -18,18 +17,29 @@ public class ProctoringController {
     @Autowired
     private SimpMessagingTemplate messagingTemplate;
 
-    // Student sends update here: /app/contest/{contestId}/alert
     @MessageMapping("/contest/{contestId}/alert")
     public void handleAlert(@DestinationVariable Long contestId, @Payload ProctorEvent event) {
 
-        // Add server-side timestamp
         event.setTimestamp(LocalDateTime.now().toString());
         event.setContestId(contestId);
 
-        System.out.println("ALERT RECEIVED: " + event.getType() + " from " + event.getUsername());
+        // Only log alerts, not video frames (too spammy)
+        if (!"CAMERA_FRAME".equals(event.getType())) {
+            System.out.println("ALERT: " + event.getType() + " from " + event.getUsername());
+        }
 
-        // Broadcast to Judges watching this contest
-        // Judges subscribe to: /topic/contest/{contestId}/judge
+        // Broadcast to Judges
         messagingTemplate.convertAndSend("/topic/contest/" + contestId + "/judge", event);
     }
+    // --- NEW: Handle Judge Actions (Warn/Suspend) ---
+    @MessageMapping("/contest/{contestId}/judge-action")
+    public void handleJudgeAction(@DestinationVariable Long contestId, @org.springframework.messaging.handler.annotation.Payload java.util.Map<String, Object> action) {
+        // action contains: type (WARN/SUSPEND), targetUserId
+        // We broadcast this to a specific student's topic
+        if (action.containsKey("targetUserId")) {
+            String targetUserId = action.get("targetUserId").toString();
+            messagingTemplate.convertAndSend("/topic/contest/" + contestId + "/student/" + targetUserId, (Object) action);
+        }
+    }
+
 }

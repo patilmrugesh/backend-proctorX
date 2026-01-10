@@ -7,7 +7,6 @@ import com.proctorx.backend.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -36,9 +35,18 @@ public class SubmissionService {
         ExecutionResponse response = new ExecutionResponse();
 
         try {
-            // 1. Fetch Data
             QuestionDSA question = questionRepository.findById(request.getQuestionId())
                     .orElseThrow(() -> new RuntimeException("Question not found"));
+
+            // --- SMART TIME LIMIT LOGIC ---
+            // 1. Get Base Limit (Default to 2.0s if Admin didn't set one)
+            Double timeLimit = question.getTimeLimitSec();
+            if (timeLimit == null || timeLimit <= 0) timeLimit = 2.0;
+
+            // 2. Apply Language Multiplier (Python is slower, give it 3x time)
+            if ("PYTHON".equalsIgnoreCase(request.getLanguage())) {
+                timeLimit = timeLimit * 3.0;
+            }
 
             List<TestCase> testCases = testCaseRepository.findByQuestionDSA_QuestionId(request.getQuestionId());
 
@@ -51,38 +59,32 @@ public class SubmissionService {
             int passed = 0;
             long totalTime = 0;
 
-            // 2. Run against ALL Test Cases
             for (TestCase tc : testCases) {
                 long start = System.currentTimeMillis();
 
-                // Call Docker
-                String actualOutput = dockerService.runCode(request.getCode(), request.getLanguage(), tc.getInputData());
+                // Pass the calculated timeLimit to Docker
+                String actualOutput = dockerService.runCode(request.getCode(), request.getLanguage(), tc.getInputData(), timeLimit);
 
                 long end = System.currentTimeMillis();
                 totalTime += (end - start);
 
-                // Check for TLE or Errors
                 if (actualOutput.startsWith("TLE:")) {
                     return saveAndReturn(request, "TLE", "Time Limit Exceeded", 0.0);
                 }
 
-                // Normalization: Trim whitespace to avoid " 5" != "5" errors
                 String expected = tc.getExpectedOutput().trim();
                 String actual = actualOutput.trim();
 
                 if (!expected.equals(actual)) {
-                    // Failed!
                     return saveAndReturn(request, "WA",
                             "Wrong Answer on Input:\n" + tc.getInputData() +
                                     "\n\nExpected:\n" + expected +
                                     "\n\nActual:\n" + actual,
                             (double)totalTime);
                 }
-
                 passed++;
             }
 
-            // 3. If loop finishes, all passed!
             return saveAndReturn(request, "AC", "All Test Cases Passed!", (double)totalTime);
 
         } catch (Exception e) {
@@ -92,7 +94,6 @@ public class SubmissionService {
     }
 
     private ExecutionResponse saveAndReturn(ExecutionRequest req, String verdict, String output, Double time) {
-        // Save to DB
         Submission sub = new Submission();
         sub.setCode(req.getCode());
         sub.setLanguage(req.getLanguage());
@@ -100,14 +101,12 @@ public class SubmissionService {
         sub.setExecutionTime(time);
         sub.setSubmittedAt(LocalDateTime.now());
 
-        // Link entities (optional for MVP speed, better validation in prod)
         if(req.getUserId() != null) sub.setUser(userRepository.findById(req.getUserId()).orElse(null));
         if(req.getContestId() != null) sub.setContest(contestRepository.findById(req.getContestId()).orElse(null));
         if(req.getQuestionId() != null) sub.setQuestion(questionRepository.findById(req.getQuestionId()).orElse(null));
 
         submissionRepository.save(sub);
 
-        // Return Response
         ExecutionResponse res = new ExecutionResponse();
         res.setVerdict(verdict);
         res.setOutput(output);
